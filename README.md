@@ -13,7 +13,7 @@ A sample MCP client based on SSE model to test out postgres MCP server supportin
 
 ./mcp-jupyter-sse-model/server/postgres
 
-The rebuilt postgres MCP server using SSE model
+The rebuilt postgres MCP server using SSE model from official postgres MCP server  (https://github.com/modelcontextprotocol/servers/tree/main/src/postgres)
 
 
 
