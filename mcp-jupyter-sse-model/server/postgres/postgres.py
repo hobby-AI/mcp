@@ -1,7 +1,6 @@
 import json
 import os
-from typing import Any, Dict
-from urllib.parse import urlparse, urlunparse
+from typing import Any
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -12,6 +11,7 @@ import decimal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
+
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Mount, Route
@@ -44,32 +44,56 @@ def execute_query(query, params=None):
     finally:
         conn.close()
 
+
 # --- Resource Handlers ---
 @mcp.resource(SCHEMA_RESOURCE)
 async def get_schema() -> str:
-    """
-    Provide the database schema as a resource.
-    This function queries the information_schema and returns all column details for public tables.
-    """
     
     rows = execute_query(
         "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema='public'"
     )
-    return json.dumps([dict(row) for row in rows], indent=2)
+
+    # Convert each row (a tuple) into a dictionary.
+    schema_data = [
+        {"table_name": row[0], "column_name": row[1], "data_type": row[2]}
+        for row in rows
+    ]
+
+    # Build the resources list using the converted schema_data.
+    resources = [
+        {
+            "uri": f"table-schema://{item['table_name']}",
+            "mimeType": "application/json",
+            "name": f"\"{item['table_name']}\" database schema",
+        }
+        for item in schema_data
+    ]
+
+    return json.dumps({ "resources" : resources}, indent=2)
+
+
 
 @mcp.resource("table-schema://{table}")
 async def get_table_schema(table: str) -> str:
-    """
-    Return column details for a given table.
-    The client should supply the table name as input.
-    """
+    
     rows = execute_query(
-        f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = {table}"
+        f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '{table}'"
     )
-    return json.dumps([dict(row) for row in rows], indent=2)
+
+    # Manually create dictionaries from each row
+    schema_data = [
+        {"column_name": row[0], "data_type": row[0]}
+        for row in rows
+    ]
+
+    return json.dumps({
+            "uri": "table-schema://{table}",
+            "mimeType": "application/json",
+            "text": json.dumps(schema_data, indent=2)
+            }, indent=2)
 
 
-# custom encoder to handle datetime and decimal types
+
 class CustomEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (datetime.date, datetime.datetime)):
@@ -99,20 +123,9 @@ def fetch_query(sql):
 # --- Register the "query" tool using the mcp.tool() decorator with positional arguments ---
 @mcp.tool("query", "Run a read-only SQL query")
 async def query_tool(sql: str) -> str:
-    """
-    Executes the provided SQL query in a read-only transaction.
-    Returns the query result as a formatted JSON string.
-    """
     rows = fetch_query(sql)
     return json.dumps([dict(row) for row in rows], indent=2, cls=CustomEncoder)
 
-# Optionally, if you need to attach an input schema, you can do so like this:
-query_tool.input_schema = {
-    "type": "object",
-    "properties": {
-        "sql": {"type": "string"}
-    }
-}
 
 # --- Starlette App and SSE Transport ---
 
@@ -167,5 +180,5 @@ if __name__ == "__main__":
 
     try:
         uvicorn.run(starlette_app, host=args.host, port=args.port)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt):
         print("Shutdown requested...exiting gracefully.")
